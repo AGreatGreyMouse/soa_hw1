@@ -1,0 +1,77 @@
+@startuml c4-container
+!include <C4/C4_Container>
+
+title Маркетплейс — C4 Container
+
+Person(buyer, "Покупатель", "Смотрит ленту, оформляет и оплачивает заказы")
+Person(seller, "Продавец", "Управляет товарами, остатками и ценами")
+
+System_Ext(email, "Email-провайдер", "Unisender: доставка писем")
+
+System_Boundary(mp, "Маркетплейс") {
+    Container(web, "Web / Mobile клиент", "SPA, мобильное приложение", "Интерфейс покупателя и кабинет продавца")
+    Container(gw, "API Gateway", "Nginx / Kong", "Единая точка входа, проверка JWT, маршрутизация, rate limiting")
+
+    Container(notification, "notification-service", "Python, FastAPI", "Email-уведомления о статусах заказов")
+    Container(user, "user-service", "Python, FastAPI", "Identity + Seller: регистрация, вход, роли, профили и реквизиты продавцов")
+    Container(feed, "feed-service", "Python, FastAPI", "Персональная лента: популярное + интересы пользователя")
+    Container(catalog, "catalog-service", "Python, FastAPI", "Товары, категории, цены, остатки и их резервирование")
+    Container(order, "order-service", "Python, FastAPI", "Корзина, оформление заказа, статусы")
+    Container(payment, "payment-service", "Python, FastAPI", "Создание платежей, обработка webhook, учёт платежей и выплат")
+
+    ContainerDb(notification_db, "Notification DB", "PostgreSQL", "Шаблоны, журнал отправок, email пользователей")
+    ContainerDb(user_db, "User DB", "PostgreSQL", "Аккаунты, хэши паролей, роли, продавцы")
+    ContainerDb(feed_db, "Feed Store", "Redis", "Интересы пользователей, популярность, копия карточек")
+    ContainerDb(catalog_db, "Catalog DB", "PostgreSQL", "Товары, категории, остатки, резервы")
+    ContainerDb(order_db, "Order DB", "PostgreSQL", "Корзины, заказы, история статусов")
+    ContainerDb(payment_db, "Payment DB", "PostgreSQL", "Платежи, возвраты, выплаты продавцам")
+
+    ContainerQueue(kafka, "Event Bus", "Apache Kafka", "Доменные события между сервисами")
+}
+
+System_Ext(psp, "Платёжный провайдер", "ЮKassa: приём оплат, возвраты, выплаты")
+
+' --- Раскладка: сервисы в один ряд, БД под своими сервисами, Kafka внизу ---
+Lay_R(buyer, seller)
+Lay_R(notification, user)
+Lay_R(user, feed)
+Lay_R(feed, catalog)
+Lay_R(catalog, order)
+Lay_R(order, payment)
+Lay_D(catalog_db, kafka)
+
+' --- Клиенты ---
+Rel_D(buyer, web, "Использует", "HTTPS")
+Rel_D(seller, web, "Использует", "HTTPS")
+Rel_D(web, gw, "API-запросы", "HTTPS / REST")
+
+' --- Синхронные вызовы ---
+Rel_D(gw, user, "Регистрация, вход", "sync, REST")
+Rel_D(gw, feed, "Лента, просмотры", "sync, REST")
+Rel_D(gw, catalog, "Товары", "sync, REST")
+Rel_D(gw, order, "Корзина, заказы", "sync, REST")
+
+Rel_L(order, catalog, "Цена, резерв остатка", "sync, REST")
+Rel_R(order, payment, "Создание платежа", "sync, REST")
+BiRel_R(payment, psp, "Платёж, выплаты / webhook об оплате", "sync, HTTPS")
+Rel_L(notification, email, "Отправка писем", "sync, HTTPS")
+
+' --- Собственные БД (database per service) ---
+Rel_D(notification, notification_db, "SQL")
+Rel_D(user, user_db, "SQL")
+Rel_D(feed, feed_db, "Redis")
+Rel_D(catalog, catalog_db, "SQL")
+Rel_D(order, order_db, "SQL")
+Rel_D(payment, payment_db, "SQL")
+
+' --- Асинхронные события ---
+Rel_D(user, kafka, "user.registered", "async")
+Rel_D(catalog, kafka, "product.*", "async")
+Rel_D(order, kafka, "order.created, order.status_changed", "async")
+Rel_D(payment, kafka, "payment.succeeded / failed", "async")
+Rel_U(kafka, order, "payment.*", "async")
+Rel_U(kafka, feed, "product.*, order.created", "async")
+Rel_U(kafka, notification, "order.status_changed, user.registered", "async")
+
+SHOW_LEGEND()
+@enduml
