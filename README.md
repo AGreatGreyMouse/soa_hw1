@@ -276,8 +276,8 @@
 ### Запуск
 
 ```bash
-git clone <url-репозитория>
-cd marketplace-architecture
+git clone https://github.com/AGreatGreyMouse/soa_hw1
+cd soa_hw1
 docker compose up --build
 ```
 
